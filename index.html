@@ -234,6 +234,18 @@
     align-self: flex-start;
   }
 
+  .turn-indicator {
+    font-size: 1rem;
+    font-weight: 800;
+    color: var(--accent2);
+    text-align: center;
+    padding: 0.35rem 1.4rem;
+    background: rgba(245,166,35,0.1);
+    border-radius: 20px;
+    border: 1px solid rgba(245,166,35,0.25);
+    letter-spacing: 0.04em;
+  }
+
   .question-card {
     background: var(--card);
     border-radius: 20px;
@@ -401,10 +413,11 @@
     <span class="cat-badge">🏰 Disney</span>
     <span class="cat-badge">🔦 Stranger Things</span>
     <span class="cat-badge">⚡ Harry Potter</span>
+    <span class="cat-badge">🐶 John Wick</span>
   </div>
 
   <button class="btn" onclick="startGame()">Let's Play! 🎉</button>
-  <p style="font-size:0.8rem; color: var(--muted);">28 questions • 20 seconds each • most points wins</p>
+  <p style="font-size:0.8rem; color: var(--muted);">32 questions • 20 seconds each • answer fast for more points!</p>
 </div>
 
 <!-- ======== GAME ======== -->
@@ -426,20 +439,14 @@
     </div>
   </div>
 
+  <div class="turn-indicator" id="turn-indicator"></div>
   <div class="q-category" id="q-category">Category</div>
   <div class="question-card" id="question-text">Loading...</div>
 
   <div class="answers-grid" id="answers-grid"></div>
 
-  <div class="reveal-row" id="reveal-row" style="display:none">
-    <button class="btn-sm reveal" onclick="revealAnswer()">👁️ Reveal Answer</button>
-  </div>
-
   <div class="reveal-row" id="next-row" style="display:none">
     <div class="score-message" id="score-message"></div>
-    <button class="btn-sm" onclick="awardPoint(1)">+1 <span id="p1-btn-label">P1</span> got it</button>
-    <button class="btn-sm" onclick="awardPoint(2)">+1 <span id="p2-btn-label">P2</span> got it</button>
-    <button class="btn-sm" onclick="awardPoint(3)">Both got it! 🎉</button>
     <button class="btn-sm next" onclick="nextQuestion()">Next →</button>
   </div>
 </div>
@@ -508,6 +515,12 @@ const QUESTIONS = [
   { cat: "⚡ Harry Potter", q: "What is the name of Harry's owl?", answers: ["Errol", "Pigwidgeon", "Hedwig", "Crookshanks"], correct: 2 },
   { cat: "⚡ Harry Potter", q: "Which spell is used to disarm an opponent?", answers: ["Accio", "Expelliarmus", "Stupefy", "Lumos"], correct: 1 },
   { cat: "⚡ Harry Potter", q: "Who is revealed to be the Half-Blood Prince?", answers: ["Draco Malfoy", "Lord Voldemort", "Albus Dumbledore", "Severus Snape"], correct: 3 },
+
+  // John Wick
+  { cat: "🐶 John Wick", q: "What is John Wick's feared nickname in the criminal underworld?", answers: ["The Ghost", "Baba Yaga", "The Reaper", "The Shadow"], correct: 1 },
+  { cat: "🐶 John Wick", q: "What object does John Wick famously use to kill multiple enemies in a hotel room?", answers: ["A fork", "A book", "A pencil", "A ruler"], correct: 2 },
+  { cat: "🐶 John Wick", q: "What is the name of the assassins-only hotel in the John Wick universe?", answers: ["The Imperial", "The Grand", "The Meridian", "The Continental"], correct: 3 },
+  { cat: "🐶 John Wick", q: "What currency do assassins use to pay for services in the John Wick world?", answers: ["Diamonds", "Gold coins", "Bitcoin", "Black pearls"], correct: 1 },
 ];
 
 const COLORS = ["--answer-a", "--answer-b", "--answer-c", "--answer-d"];
@@ -520,7 +533,8 @@ let scores = [0, 0];
 let names = ["Player 1", "Player 2"];
 let timerInterval = null;
 let timeLeft = TOTAL_TIME;
-let revealed = false;
+let answered = false;
+let activePlayer = 0;
 
 // -------- STARS --------
 function makeStars() {
@@ -555,11 +569,10 @@ function startGame() {
   shuffledQs = shuffle(QUESTIONS);
   currentQ = 0;
   scores = [0, 0];
+  activePlayer = 0;
 
   document.getElementById('p1-label').textContent = names[0];
   document.getElementById('p2-label').textContent = names[1];
-  document.getElementById('p1-btn-label').textContent = names[0];
-  document.getElementById('p2-btn-label').textContent = names[1];
 
   showScreen('game-screen');
   loadQuestion();
@@ -574,17 +587,20 @@ function showScreen(id) {
 function loadQuestion() {
   if (currentQ >= shuffledQs.length) { showEndScreen(); return; }
 
-  revealed = false;
+  answered = false;
+  activePlayer = currentQ % 2;
   const q = shuffledQs[currentQ];
+
+  document.getElementById('p1-card').classList.toggle('active-player', activePlayer === 0);
+  document.getElementById('p2-card').classList.toggle('active-player', activePlayer === 1);
+  document.getElementById('turn-indicator').textContent = `🎯 ${names[activePlayer]}'s turn!`;
 
   document.getElementById('q-category').textContent = q.cat;
   document.getElementById('question-text').textContent = q.q;
   document.getElementById('q-counter').textContent = `Q ${currentQ + 1} / ${shuffledQs.length}`;
-  document.getElementById('reveal-row').style.display = 'flex';
   document.getElementById('next-row').style.display = 'none';
   document.getElementById('score-message').textContent = '';
 
-  // Build answers
   const grid = document.getElementById('answers-grid');
   grid.innerHTML = '';
   q.answers.forEach((ans, i) => {
@@ -592,8 +608,8 @@ function loadQuestion() {
     btn.className = 'answer-btn';
     btn.style.setProperty('--color', `var(${COLORS[i]})`);
     btn.innerHTML = `<span class="letter">${LETTERS[i]}</span>${ans}`;
-    btn.disabled = true; // disabled until reveal
     btn.id = `ans-${i}`;
+    btn.onclick = () => handleAnswer(i);
     grid.appendChild(btn);
   });
 
@@ -610,8 +626,7 @@ function startTimer() {
     updateTimerUI();
     if (timeLeft <= 0) {
       clearInterval(timerInterval);
-      // auto-reveal when timer hits 0
-      if (!revealed) revealAnswer();
+      if (!answered) revealAnswer();
     }
   }, 1000);
 }
@@ -627,42 +642,56 @@ function updateTimerUI() {
   circle.style.background = `conic-gradient(${color} calc(${pct} * 1%), #333355 0%)`;
 }
 
-// -------- REVEAL --------
-function revealAnswer() {
+// -------- HANDLE ANSWER --------
+function handleAnswer(chosen) {
+  if (answered) return;
   clearInterval(timerInterval);
-  revealed = true;
+  answered = true;
+
+  const q = shuffledQs[currentQ];
+  const correct = chosen === q.correct;
+
+  q.answers.forEach((_, i) => {
+    const btn = document.getElementById(`ans-${i}`);
+    btn.disabled = true;
+    btn.onclick = null;
+    if (i === q.correct) btn.classList.add('correct');
+    else btn.classList.add('wrong');
+  });
+
+  if (correct) {
+    const pts = calcPoints(timeLeft);
+    scores[activePlayer] += pts;
+    updateScoreDisplay();
+    showPtsPopup(document.getElementById(`p${activePlayer + 1}-card`), `+${pts}`);
+    document.getElementById('score-message').textContent = `✅ Correct! +${pts} pts`;
+  } else {
+    document.getElementById('score-message').textContent = `❌ Wrong! No points.`;
+  }
+
+  document.getElementById('next-row').style.display = 'flex';
+}
+
+function calcPoints(tLeft) {
+  return Math.max(100, Math.round(1000 * tLeft / TOTAL_TIME));
+}
+
+// -------- REVEAL (timer expired) --------
+function revealAnswer() {
+  if (answered) return;
+  answered = true;
   const q = shuffledQs[currentQ];
 
   q.answers.forEach((_, i) => {
     const btn = document.getElementById(`ans-${i}`);
-    if (i === q.correct) {
-      btn.classList.add('correct');
-    } else {
-      btn.classList.add('wrong');
-    }
+    btn.disabled = true;
+    btn.onclick = null;
+    if (i === q.correct) btn.classList.add('correct');
+    else btn.classList.add('wrong');
   });
 
-  document.getElementById('reveal-row').style.display = 'none';
+  document.getElementById('score-message').textContent = `⏰ Time's up! No points.`;
   document.getElementById('next-row').style.display = 'flex';
-  document.getElementById('score-message').textContent = `Who got it right?`;
-}
-
-// -------- AWARD --------
-function awardPoint(who) {
-  // who: 1 = p1, 2 = p2, 3 = both
-  const timeBonus = Math.max(0, Math.round(timeLeft / TOTAL_TIME * 500));
-  const base = 1000;
-
-  if (who === 1 || who === 3) {
-    scores[0] += base + timeBonus;
-    showPtsPopup(document.getElementById('p1-card'), `+${base + timeBonus}`);
-  }
-  if (who === 2 || who === 3) {
-    scores[1] += base + timeBonus;
-    showPtsPopup(document.getElementById('p2-card'), `+${base + timeBonus}`);
-  }
-
-  updateScoreDisplay();
 }
 
 function showPtsPopup(el, text) {
